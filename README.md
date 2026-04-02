@@ -164,7 +164,10 @@ cp .env.example .env
 - `PROMETHEUS_RETENTION=2d`
 - `PROMETHEUS_MEM_LIMIT=256m`
 
-Важно: в compose используется локальная сборка образа `xray-exporter` из GitHub Release (`XRAY_EXPORTER_VERSION`, по умолчанию `v0.2.0`), потому что `ghcr.io/compassvpn/xray-exporter:latest` на части хостов стартует с `permission denied` на бинарнике.
+Важно: в compose используется локальная сборка образа `xray-exporter` из исходников тега `XRAY_EXPORTER_VERSION` (по умолчанию `v0.2.0`) с inline-патчем в `docker/xray-exporter/Dockerfile`.
+Это решает два практических момента:
+- обход `permission denied` у готового `ghcr.io/compassvpn/xray-exporter:latest` на части хостов;
+- экспорт user-series `xray_traffic_*{dimension="user",target="<email>"}` для анализа распределения throughput по клиентам.
 
 Старт:
 
@@ -269,5 +272,6 @@ ufw enable
 - `xray-exporter`, `prometheus` и `node-exporter` запущены в `network_mode: host`, чтобы безопасно работать с API Xray на `127.0.0.1`.
 - Для текущего сервера с `x-ui` API уже живёт на `127.0.0.1:62789`, поэтому в `.env` нужно использовать именно этот порт.
 - Для `x-ui` в текущей версии нормально, если `metrics` отсутствует в `bin/config.json`: `xray-exporter` продолжает работать по API и access.log.
-- Метрики пользователя и активность зависят от того, какие именно series экспортирует `xray-exporter`; dashboard использует наиболее типичные имена метрик этого exporter.
+- В этой конфигурации `xray-exporter` собран с включённым user traffic (label `dimension="user"`), поэтому панели по пользователям в Grafana работают напрямую по Xray API stats.
+- User-series увеличивают кардинальность метрик: при большом числе клиентов может потребоваться уменьшить retention или поднять лимит памяти Prometheus.
 - Для `1 GB RAM` лучше иметь хотя бы `1 GB` swap. На Ubuntu 24 это можно сделать через `fallocate`, `mkswap`, `swapon` и запись в `/etc/fstab`.
