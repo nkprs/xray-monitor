@@ -16,7 +16,7 @@
 
 - на сервере наружу не публикуется ничего, кроме SSH
 - Prometheus открывается только на `127.0.0.1:9090`
-- `xray-exporter` и `node-exporter` доступны только внутри docker-сети
+- `xray-exporter` и `node-exporter` слушают только loopback (`127.0.0.1`) на хосте
 - данные Prometheus и локальной Grafana хранятся в docker volumes
 
 ## Структура
@@ -157,12 +157,14 @@ cp .env.example .env
 
 Минимум проверь:
 
-- `XRAY_API_ENDPOINT=host.docker.internal:62789`
+- `XRAY_API_ENDPOINT=127.0.0.1:62789`
 - `XRAY_ACCESS_LOG=/var/log/xray/access.log`
 - `XRAY_ACCESS_LOG_DIR=/var/log/xray`
-- `PROMETHEUS_BIND_ADDRESS=127.0.0.1`
+- `PROMETHEUS_LISTEN_ADDRESS=127.0.0.1:9090`
 - `PROMETHEUS_RETENTION=2d`
 - `PROMETHEUS_MEM_LIMIT=256m`
+
+Важно: в compose используется локальная сборка образа `xray-exporter` из GitHub Release (`XRAY_EXPORTER_VERSION`, по умолчанию `v0.2.0`), потому что `ghcr.io/compassvpn/xray-exporter:latest` на части хостов стартует с `permission denied` на бинарнике.
 
 Старт:
 
@@ -195,7 +197,7 @@ docker compose exec prometheus wget -qO- http://localhost:9090/api/v1/targets
 Проверить метрики exporter:
 
 ```bash
-docker compose exec prometheus wget -qO- http://xray-exporter:9550/scrape
+docker compose exec prometheus wget -qO- http://127.0.0.1:9550/scrape
 ```
 
 Проверить, что Prometheus слушает только loopback на сервере:
@@ -264,9 +266,8 @@ ufw enable
 
 ## 8. Замечания
 
-- `xray-exporter` ожидает, что API Xray доступен на хосте по loopback; контейнер ходит к нему через `host.docker.internal`.
+- `xray-exporter`, `prometheus` и `node-exporter` запущены в `network_mode: host`, чтобы безопасно работать с API Xray на `127.0.0.1`.
 - Для текущего сервера с `x-ui` API уже живёт на `127.0.0.1:62789`, поэтому в `.env` нужно использовать именно этот порт.
 - Для `x-ui` в текущей версии нормально, если `metrics` отсутствует в `bin/config.json`: `xray-exporter` продолжает работать по API и access.log.
-- Метрики пользователя и активность зависят от того, какие именно series экспортирует образ `ghcr.io/compassvpn/xray-exporter`. Dashboard уже использует наиболее типичные имена метрик этого exporter.
-- Если на VPS нет `host-gateway` поддержки в Docker, проще всего заменить `XRAY_API_ENDPOINT` на реальный IP хоста в bridge-сети или перевести exporter в `network_mode: host`.
+- Метрики пользователя и активность зависят от того, какие именно series экспортирует `xray-exporter`; dashboard использует наиболее типичные имена метрик этого exporter.
 - Для `1 GB RAM` лучше иметь хотя бы `1 GB` swap. На Ubuntu 24 это можно сделать через `fallocate`, `mkswap`, `swapon` и запись в `/etc/fstab`.
