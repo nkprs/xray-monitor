@@ -4,6 +4,8 @@
 
 Текущий профиль настроен консервативно под маленький VPS с `1 GB RAM`: на сервере крутятся только `Prometheus + exporters`, а `Grafana` запускается локально через SSH-туннель.
 
+Ниже сценарий ориентирован на установку Xray через `x-ui`, где живой конфиг лежит в `/usr/local/x-ui/bin/config.json`.
+
 - `xray-exporter` для Xray API и `access.log`
 - `Prometheus` для хранения метрик минимум 2 дня
 - `Grafana` в отдельном локальном compose
@@ -82,11 +84,33 @@ ssh user@server 'chmod +x /usr/local/bin/xraycfg'
 
 ## 2. Подготовить Xray
 
-Если у тебя уже есть рабочий `config.json`, можно слить в него обязательные секции автоматически:
+Если у тебя уже есть рабочий `config.json`, можно слить в него обязательные секции автоматически.
+
+Важно:
+
+- существующие клиентские inbounds и их порты не переписываются
+- текущий `api` inbound сохраняется, если он уже есть
+- `xraycfg merge` добавляет недостающие секции мониторинга и включает логи
+- для `x-ui` нельзя полагаться на ручное редактирование `bin/config.json`: панель перегенерирует его при перезапуске
+
+Для обычной установки Xray (без `x-ui`) можно применять merge напрямую:
 
 ```bash
-xraycfg merge --in /usr/local/etc/xray/config.json --out /usr/local/etc/xray/config.monitoring.json
+xraycfg merge \
+  --api-port 62789 \
+  --in /usr/local/etc/xray/config.json \
+  --out /usr/local/etc/xray/config.monitoring.json
 ```
+
+Для `x-ui` на этом сервере текущий API уже слушает `127.0.0.1:62789`.
+Поэтому фактически нужно:
+
+```bash
+xraycfg validate --file /usr/local/x-ui/bin/config.json
+```
+
+И включить `access/error` логи через web-панель `x-ui` (раздел настроек Xray), после чего выполнить `Restart Xray` из панели.
+`metrics`-блок `x-ui` обычно не сохраняет в сгенерированном конфиге, и это ожидаемо для текущего стека: `xray-exporter` использует API + access.log.
 
 Если нужен только шаблон фрагмента:
 
@@ -97,23 +121,30 @@ xraycfg patch
 Проверка существующего конфига:
 
 ```bash
-xraycfg validate --file /usr/local/etc/xray/config.json
+xraycfg validate --file /usr/local/x-ui/bin/config.json
+```
+
+Строгая проверка с обязательным `metrics` (для plain Xray):
+
+```bash
+xraycfg validate --require-metrics --file /usr/local/etc/xray/config.json
 ```
 
 CLI проверяет и/или добавляет:
 
 - `stats`
 - `api` c `StatsService`
-- localhost inbound на `127.0.0.1:10085`
+- localhost inbound для API (в этом проекте обычно `127.0.0.1:62789`)
 - routing rule для `api`
 - `policy.levels.0` и `policy.system`
+- `metrics.tag`
 - `metrics.listen`
 - `log.access` и `log.error`
 
 После слияния секций перезапусти Xray и проверь API вручную. Пример с установленным `xray`:
 
 ```bash
-xray api statsquery --server=127.0.0.1:10085 -pattern 'user>>>'
+xray api statsquery --server=127.0.0.1:62789 -pattern 'user>>>'
 ```
 
 ## 3. Поднять серверный стек мониторинга
@@ -126,7 +157,7 @@ cp .env.example .env
 
 Минимум проверь:
 
-- `XRAY_API_ENDPOINT=host.docker.internal:10085`
+- `XRAY_API_ENDPOINT=host.docker.internal:62789`
 - `XRAY_ACCESS_LOG=/var/log/xray/access.log`
 - `XRAY_ACCESS_LOG_DIR=/var/log/xray`
 - `PROMETHEUS_BIND_ADDRESS=127.0.0.1`
@@ -233,7 +264,9 @@ ufw enable
 
 ## 8. Замечания
 
-- `xray-exporter` ожидает, что API Xray доступен на хосте по `127.0.0.1:10085`; контейнер ходит к нему через `host.docker.internal`.
+- `xray-exporter` ожидает, что API Xray доступен на хосте по loopback; контейнер ходит к нему через `host.docker.internal`.
+- Для текущего сервера с `x-ui` API уже живёт на `127.0.0.1:62789`, поэтому в `.env` нужно использовать именно этот порт.
+- Для `x-ui` в текущей версии нормально, если `metrics` отсутствует в `bin/config.json`: `xray-exporter` продолжает работать по API и access.log.
 - Метрики пользователя и активность зависят от того, какие именно series экспортирует образ `ghcr.io/compassvpn/xray-exporter`. Dashboard уже использует наиболее типичные имена метрик этого exporter.
 - Если на VPS нет `host-gateway` поддержки в Docker, проще всего заменить `XRAY_API_ENDPOINT` на реальный IP хоста в bridge-сети или перевести exporter в `network_mode: host`.
 - Для `1 GB RAM` лучше иметь хотя бы `1 GB` swap. На Ubuntu 24 это можно сделать через `fallocate`, `mkswap`, `swapon` и запись в `/etc/fstab`.

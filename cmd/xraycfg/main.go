@@ -15,6 +15,7 @@ type options struct {
 	APITag        string
 	APIListen     string
 	APIPort       int
+	MetricsTag    string
 	MetricsListen string
 	AccessLog     string
 	ErrorLog      string
@@ -108,6 +109,7 @@ func runMerge(args []string) error {
 func runValidate(args []string) error {
 	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
 	filePath := fs.String("file", "", "path to Xray config")
+	requireMetrics := fs.Bool("require-metrics", false, "treat missing metrics block as validation error")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -185,9 +187,20 @@ func runValidate(args []string) error {
 
 	metrics := asMap(root["metrics"])
 	if metrics == nil || strings.TrimSpace(asString(metrics["listen"])) == "" {
-		issues = append(issues, "metrics.listen is missing")
+		if *requireMetrics {
+			issues = append(issues, "metrics.listen is missing")
+		} else {
+			warnings = append(warnings, "metrics.listen is missing (allowed without --require-metrics)")
+		}
 	} else if !isLoopbackAddress(asString(metrics["listen"])) {
 		warnings = append(warnings, "metrics.listen is not bound to localhost")
+	}
+	if metrics == nil || strings.TrimSpace(asString(metrics["tag"])) == "" {
+		if *requireMetrics {
+			issues = append(issues, "metrics.tag is missing")
+		} else {
+			warnings = append(warnings, "metrics.tag is missing (allowed without --require-metrics)")
+		}
 	}
 
 	logBlock := asMap(root["log"])
@@ -225,6 +238,7 @@ func newCommonFlagSet(name string) (*flag.FlagSet, options) {
 		APITag:        "api",
 		APIListen:     "127.0.0.1",
 		APIPort:       10085,
+		MetricsTag:    "metrics",
 		MetricsListen: "127.0.0.1:11111",
 		AccessLog:     "/var/log/xray/access.log",
 		ErrorLog:      "/var/log/xray/error.log",
@@ -233,6 +247,7 @@ func newCommonFlagSet(name string) (*flag.FlagSet, options) {
 	fs.StringVar(&opts.APITag, "api-tag", opts.APITag, "tag for the internal Xray API")
 	fs.StringVar(&opts.APIListen, "api-listen", opts.APIListen, "listen address for the Xray API inbound")
 	fs.IntVar(&opts.APIPort, "api-port", opts.APIPort, "port for the Xray API inbound")
+	fs.StringVar(&opts.MetricsTag, "metrics-tag", opts.MetricsTag, "tag for the Xray metrics endpoint")
 	fs.StringVar(&opts.MetricsListen, "metrics-listen", opts.MetricsListen, "listen address for the Xray metrics endpoint")
 	fs.StringVar(&opts.AccessLog, "access-log", opts.AccessLog, "path to access.log")
 	fs.StringVar(&opts.ErrorLog, "error-log", opts.ErrorLog, "path to error.log")
@@ -284,6 +299,7 @@ func requiredPatch(opts options) map[string]any {
 			},
 		},
 		"metrics": map[string]any{
+			"tag":    opts.MetricsTag,
 			"listen": opts.MetricsListen,
 		},
 		"log": map[string]any{
@@ -327,6 +343,7 @@ func mergeRequired(root map[string]any, opts options) {
 	system["statsOutboundDownlink"] = true
 
 	metrics := ensureMap(root, "metrics")
+	metrics["tag"] = opts.MetricsTag
 	metrics["listen"] = opts.MetricsListen
 
 	logBlock := ensureMap(root, "log")
