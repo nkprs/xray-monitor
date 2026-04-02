@@ -1,0 +1,63 @@
+services:
+  xray-exporter:
+    image: ghcr.io/compassvpn/xray-exporter:latest
+    container_name: xray-exporter
+    restart: unless-stopped
+    mem_limit: ${XRAY_EXPORTER_MEM_LIMIT:-64m}
+    command:
+      - --web.listen-address=:9550
+      - --xray-endpoint=${XRAY_API_ENDPOINT:-host.docker.internal:10085}
+      - --log-path=${XRAY_ACCESS_LOG:-/var/log/xray/access.log}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - ${XRAY_ACCESS_LOG_DIR:-/var/log/xray}:${XRAY_ACCESS_LOG_DIR:-/var/log/xray}:ro
+    networks:
+      - monitoring
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    mem_limit: ${PROMETHEUS_MEM_LIMIT:-256m}
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-2d}
+      - --storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-512MB}
+      - --storage.tsdb.wal-compression
+      - --query.max-concurrency=${PROMETHEUS_QUERY_MAX_CONCURRENCY:-4}
+      - --query.timeout=${PROMETHEUS_QUERY_TIMEOUT:-30s}
+      - --web.enable-lifecycle
+    ports:
+      - ${PROMETHEUS_BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - monitoring
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    mem_limit: ${NODE_EXPORTER_MEM_LIMIT:-64m}
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/root
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($|/)
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro,rslave
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  prometheus-data:

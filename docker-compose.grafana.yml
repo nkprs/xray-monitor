@@ -1,0 +1,24 @@
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-local
+    restart: unless-stopped
+    mem_limit: ${GRAFANA_MEM_LIMIT:-192m}
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SERVER_DOMAIN: ${GRAFANA_DOMAIN:-}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-%(protocol)s://%(domain)s:%(http_port)s/}
+      GRAFANA_PROMETHEUS_URL: ${GRAFANA_PROMETHEUS_URL:-http://host.docker.internal:9090}
+    ports:
+      - ${GRAFANA_BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+volumes:
+  grafana-data:
